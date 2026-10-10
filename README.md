@@ -52,6 +52,78 @@ Você **não** precisa instalar Terraform nem AWS CLI: quem cuida do deploy é o
 
 ---
 
+## 🧠 Como esta cobra pensa
+
+A lógica em `src/logic/engine/` é um motor de busca derivado da
+[Shapeshifter](https://github.com/JonathanArns/shapeshifter) (campeã mundial
+de 2022), reescrito para o tabuleiro 11x11 standard e para rodar dentro de uma
+Lambda:
+
+| Arquivo | O que faz |
+|---|---|
+| `bitboard.rs` | Tabuleiro em `u128` (uma casa por bit) e simulação exata das regras do servidor: cabeças, fome, comida, caudas empilhadas, colisões. Todo o estado é `Copy`: clonar uma posição custa o mesmo que copiar 80 bytes. |
+| `movegen.rs` | Jogadas legais, ordenadas por heurística de histórico e por "saídas" da casa de destino. Gera combinações de jogadas inimigas cobrindo cada jogada de cada inimigo. |
+| `search.rs` | Minimax paranoico (nós contra todos) com poda alfa-beta, aprofundamento iterativo guiado por *Best Node Search*, tabela de transposição, extensão de sequências forçadas e quiescência quando as cabeças estão perto. Respeita o prazo e devolve a melhor jogada da última profundidade concluída. |
+| `eval.rs` | Avaliação por controle de território (Voronoi em bitboard com desempate pela cobra maior), vida, diferença de tamanho (logarítmica), comida controlada, distância da comida e acesso às caudas. Pesos interpolados pelo turno. **Diferença em relação à Shapeshifter:** o Voronoi sabe que cada casa de corpo fica livre quando a cauda passa por ela, então regiões "fechadas" pelo próprio corpo contam certo. Na arena isso levou a taxa de vitória contra a Shapeshifter de 55% para 77%. |
+| `endgame.rs` | Resolvedor de finais 1x1: quando cada cobra está na sua região, estima quem fica sem espaço primeiro. **Diferença em relação à Shapeshifter:** o veredito não é tratado como terminal; a busca continua aprofundando e a simulação real prevalece quando a heurística erra (antes, um veredito errado travava a busca na profundidade 1). |
+| `ttable.rs` | Tabela de transposição lock-free (64 MB) que sobrevive entre turnos. |
+
+O `src/logic.rs` só faz a cola: gestão de tempo e conversão para JSON.
+
+**Gestão de tempo.** A cobra usa `timeout - margem`. A margem é adaptativa:
+compara a latência que o servidor reporta (`you.latency`) com o tempo que a
+busca gastou no turno anterior e descobre quanto a rede e a Lambda custam.
+`TIME_MARGIN_MS` força uma margem fixa (útil em testes locais).
+
+**Lambda.** A memória fica no padrão do template (256 MB, cerca de 0,15 vCPU). A
+tabela de transposição tem 16 MB para não custar tempo numa instância fria, e a
+primeira jogada de cada partida numa instância nova usa só metade do prazo,
+porque o cold start acontece antes do handler e não entra na nossa contagem.
+
+### Testando localmente contra outra cobra
+
+Sem o linker da Microsoft instalado, o jeito mais simples é compilar dentro
+do Docker (a imagem `rust:slim` já serve):
+
+```bash
+docker run --rm -v "$PWD:/app" -v cargo-registry:/usr/local/cargo/registry -w /app rust:slim   cargo build --release --bins --target-dir /app/target-docker
+
+docker run -d --name leo-snake -p 8082:8080 -e TIME_MARGIN_MS=60   -v "$PWD/target-docker/release:/snake:ro" rust:slim /snake/local
+```
+
+`src/bin/local.rs` é um servidor HTTP mínimo (só biblioteca padrão) que expõe
+a mesma lógica da Lambda. Com as duas cobras no ar:
+
+```bash
+python tools/arena.py --me http://localhost:8082 --opp http://localhost:8081 -n 20 -j 3
+```
+
+O script roda `2n` partidas em pares com a ordem trocada, imprime a taxa de
+vitória com intervalo de confiança (Wilson 95%) e guarda as derrotas em
+`arena_out/` para você rever. `tools/deaths.py` resume a causa de cada morte.
+Para experimentar pesos da avaliação sem recompilar, use `EVAL_WEIGHTS`
+(veja `eval.rs`); `TAIL_AWARE=0` desliga o Voronoi ciente das caudas e
+`ENEMY_TAIL_DELAY=0` tira o atraso aplicado às caudas inimigas.
+
+Partidas gravadas em `arena_runs/` servem de teste de regressão das regras:
+`cargo test --release -- --ignored replay` reproduz cada turno na nossa
+simulação e confere que bate com o servidor oficial.
+
+Resultados medidos (40 partidas, 500 ms, Shapeshifter em Docker):
+
+| Versão | V | D | E | Taxa |
+|---|---|---|---|---|
+| Porta pura da Shapeshifter | 21 | 17 | 2 | 55% |
+| + Voronoi ciente das caudas (semente 2000) | 30 | 9 | 1 | 77% |
+| + Voronoi ciente das caudas (semente 3000) | 29 | 10 | 1 | 74% |
+| + veredito do resolvedor não terminal (semente 2000) | 31 | 9 | 0 | 78% |
+| + cauda inimiga com 1 turno de atraso (semente 2000) | 33 | 7 | 0 | 83% |
+
+Contra as 19 cobras de 2026 da organização (10 partidas cada, antes da última
+correção): 185 vitórias, 4 derrotas, 1 empate.
+
+---
+
 ## 📂 Estrutura do projeto
 
 ```

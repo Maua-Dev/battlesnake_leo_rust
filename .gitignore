@@ -17,3 +17,15 @@ terraform.rc
 .DS_Store
 .idea/
 .vscode/
+
+# artefatos locais de teste
+target-docker/
+target-gnu/
+arena_out/
+tools/battlesnake
+tools/battlesnake.exe
+tools/cli.*
+arena_runs/
+target-docker-b/
+target-docker-256/
+target-ci/

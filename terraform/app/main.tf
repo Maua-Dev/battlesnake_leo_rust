@@ -78,6 +78,9 @@ resource "aws_lambda_function" "battlesnake" {
   architectures = ["x86_64"]
 
   timeout     = 10
+  # Padrão do template. A CPU da Lambda é proporcional à memória (1769 MB =
+  # 1 vCPU), então 256 MB dá ~0,15 vCPU; a cobra foi ajustada para isso.
+  # A cobra é limitada por CPU (busca em árvore), então isso vale ouro.
   memory_size = 256
 
   environment {
