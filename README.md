@@ -75,7 +75,8 @@ compara a latência que o servidor reporta (`you.latency`) com o tempo que a
 busca gastou no turno anterior e descobre quanto a rede e a Lambda custam.
 `TIME_MARGIN_MS` força uma margem fixa (útil em testes locais).
 
-**Lambda.** A memória fica no padrão do template (256 MB, cerca de 0,15 vCPU). A
+**Lambda.** A memória está em 1024 MB (cerca de 0,6 vCPU, quatro vezes o padrão de
+256 MB do template); a cobra também foi testada em 256 MB e funciona bem. A
 tabela de transposição tem 16 MB para não custar tempo numa instância fria, e a
 primeira jogada de cada partida numa instância nova usa só metade do prazo,
 porque o cold start acontece antes do handler e não entra na nossa contagem.
